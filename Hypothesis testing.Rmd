@@ -1,0 +1,189 @@
+---
+title: "Simulation Hypothesis Testing"
+author: "Group 124"
+date: "19/04/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_Sections: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+
+## Hypothesis Testing
+
+Read in the simulation outputs and re-structure the dataframes:
+```{r}
+attack <- read.csv("Sim Outputs/inf_att.csv", header = TRUE)
+durs <- read.csv("Sim Outputs/durations.csv", header = TRUE)
+
+scenarios <- c(rep("Natural Spread", 50), rep("Preventative Measures", 50), rep("Vaccination A", 50), rep("Vaccination B", 50))
+scenarios <- as.factor(scenarios)
+
+attack_rates <- c(attack$Natural_spread, attack$Preventative_measures, attack$Vaccination_Strategy_A, attack$Vaccination_Strategy_B)
+
+durations <- c(durs$Natural_spread, durs$Preventative_measures, durs$Vaccination_Strategy_A, durs$Vaccination_Strategy_B)
+
+data <- data.frame(scenarios, attack_rates, durations)
+```
+
+### Comparing Infection Attack Rates:
+
+Directly apply a two-sided ANOVA to the simulation outputs. 
+```{r}
+# build model, check pairwise mean differences
+aov_attack <- aov(attack_rates~scenarios, data = data)
+summary(aov_attack)
+TukeyHSD(aov_attack)
+```
+
+Based on this result, we can say that across all four scenarios, the total number of individuals infected was different.
+
+However, before we make any such inferences, we should run some diagnostics on the model and check for goodness of fit.
+
+There are 3 main assumptions in an ANOVA, and they can all be tested using residual analysis:
+
+* constant variance: the residuals (errors) have constant variance across all the groups
+
+* normality: the errors are normally distributed around 0
+
+* independence: the errors are independent random variables
+
+```{r}
+# goodness of fit
+attack_resids <- residuals(aov_attack)
+data %>%
+  ggplot(aes(x = scenarios, y = attack_resids)) +
+  geom_boxplot() +
+  geom_point() +
+  labs(x = "Scenarios", y = "Residuals",
+       title = "Test for constant variance and correlated errors",
+       subtitle = "(shows non-constant variance, no evidence for correlated errors)") +
+  theme_bw() +
+  theme(plot.subtitle = element_text(face = "italic"))
+```
+
+Since all the residuals are spread evenly across zero, we can say that there is no evidence for correlated errors.
+
+Since the variances across the groups look non-constant, we do a Brown-Forsythe test to check if the differences are statistically significant. This is just a formality because the spreads are clearly different.
+```{r}
+#Brown-Forsythe test for variance:
+onewaytests::bf.test(attack_rates~scenarios, data = data)
+```
+
+The differences are statistically significant, so the constant variance assumption of ANOVA is violated. However, ANOVA is typically robust to departures from the non constant variance assumption. Let's see how great the differences are:
+```{r}
+#calculate variance residuals by group
+data.frame(scenarios, attack_resids) %>%
+  group_by(scenarios) %>%
+  summarize(var=var(attack_resids))
+```
+
+Since the largest variance is over 4 times as large as the smallest variance, we cannot use an ANOVA. Additionally, this may suggest a departure form normality. Create a normal probability plot of the residuals just to be sure:
+```{r}
+car::qqPlot(attack_resids, ylab = "Normal qualtiles", xlab = "Residuals", 
+            main = "Normal Probability Plot: (heavy tailed distribution)")
+```
+
+The normal probability plot shows a heavy tailed distribution, a pretty evident departure from normality. Based on this result, we conclude that the ANOVA is not a good fit for our simulation output, so we cannot make any inferences based on its results.
+
+Instead, let's conduct a Kruskal-Wallis test. 
+```{r}
+kruskal.test(attack_rates~scenarios, data = data)
+```
+
+This tells us that there is a significant difference between the four scenarios. To do a pairwise comparison, let's use a pairwise Wilcox Test.
+```{r, warning=FALSE}
+pairwise.wilcox.test(x = data$attack_rates, g = data$scenarios)
+```
+
+This shows us that the means of all the groups are statistically significantly different. So we can conclude that vaccination strategy B has a lower infection attack rate than vaccination strategy A.
+```{r}
+data %>%
+  ggplot(aes(x=scenarios, y = attack_rates)) +
+  geom_jitter(col = "red", alpha = 0.5) +
+  geom_boxplot() +
+  labs(x = "Epidemic Spread Scenario", y = "Infection Attack Rate",
+       title = "Infection Attack Rate by Epidemic Spread Scenario") +
+  theme_bw()
+```
+
+### Comparing Epidemic Durations:
+
+Directly apply a two-sided ANOVA to the simulation outputs. 
+```{r}
+aov_durations <- aov(durations~scenarios, data = data)
+summary(aov_durations)
+TukeyHSD(aov_durations)
+```
+
+Based on this result, we can say that across all four scenarios, the epidemic durations were different.
+
+However, before we make any such inferences, we should run some diagnostics on the model and check for goodness of fit, same as we did for the first ANOVA.
+
+```{r}
+# goodness of fit
+dur_resids <- residuals(aov_durations)
+data %>%
+  ggplot(aes(x = scenarios, y = dur_resids)) +
+  geom_boxplot() +
+  geom_point() +
+  labs(x = "Scenarios", y = "Residuals",
+       title = "Test for constant variance and correlated errors",
+       subtitle = "(shows non-constant variance, no evidence for correlated errors)") +
+  theme_bw() +
+  theme(plot.subtitle = element_text(face = "italic"))
+```
+
+Since all the residuals are spread evenly across zero, we can say that there is no evidence for correlated errors.
+
+Since the variances across the groups look non-constant, we do a Brown-Forsythe test to check if the differences are statistically significant. This is just a formality because the spreads are clearly different.
+```{r}
+#Brown-Forsythe test for variance:
+onewaytests::bf.test(durations~scenarios, data = data)
+```
+
+The differences are statistically significant, so the constant variance assumption of ANOVA is violated. However, ANOVA is typically robust to departures from the non constant variance assumption. Let's see how great the differences are:
+```{r}
+#calculate variance residuals by group
+data.frame(scenarios, dur_resids) %>%
+  group_by(scenarios) %>%
+  summarize(var=var(dur_resids))
+```
+
+Since the largest variance (94.02) is less than twice the smallest variance (49.03), the ANOVA should withstand the violation of the constant variance assumption.
+
+Still, create a normal probability plot and a histogram of the residuals to check if residuals are normally distributed.
+```{r}
+car::qqPlot(dur_resids, ylab = "Normal qualtiles", xlab = "Residuals", 
+            main = "Normal Probability Plot: (heavy tailed distribution)")
+hist(dur_resids, xlab = "Residuals", main = "Histogram of residuals")
+```
+
+The right-skewed distribution could possibly be an artefact due to unequal variances. In any case, since most ANOVAs are robust to slight departures from normality, we can proceed to make inferences from our ANOVA model here.
+
+re-printing the output from above:
+```{r}
+summary(aov_durations)
+TukeyHSD(aov_durations)
+```
+
+As we can see from here, the vaccinations and preventative measures on the whole resulted in a drawn out epidemic. However, we see no difference between the mean epidemic duration based on which vaccination strategy is used. 
+
+```{r}
+data %>%
+  ggplot(aes(x = scenarios, y = durations)) +
+  geom_boxplot() +
+  geom_point(col = "red", alpha = 0.2) +
+  labs(x = "Epidemic Spread Scenario", y = "Epidemic Duration", title = "Epidemic Duration by Epidemic Spread Scenario") +
+  theme_bw() +
+  theme(plot.subtitle = element_text(face = "italic"))
+```
+
+Overall, we can conclude that based on the epidemic duration metric, the two vaccination strategies are equally good. However, based on the infection attack rate, vaccination strategy B is better than vaccination strategy A.
